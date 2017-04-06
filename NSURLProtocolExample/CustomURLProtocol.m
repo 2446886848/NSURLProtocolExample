@@ -34,18 +34,13 @@ static NSString * const URLProtocolHandledKey = @"URLProtocolHandledKey";
      [scheme caseInsensitiveCompare:@"https"] == NSOrderedSame))
     {
         //看看是否已经处理过了，防止无限循环
-        if (isDealed) {
-            return NO;
-        }
-        return YES;
+        return !isDealed;
     }
     return NO;
 }
 
 + (NSURLRequest *) canonicalRequestForRequest:(NSURLRequest *)request {
-    NSMutableURLRequest *mutableReqeust = [request mutableCopy];
-    mutableReqeust = [self redirectHostInRequset:mutableReqeust];
-    return mutableReqeust;
+    return request;
 }
 
 + (BOOL)requestIsCacheEquivalent:(NSURLRequest *)a toRequest:(NSURLRequest *)b
@@ -70,6 +65,7 @@ static NSString * const URLProtocolHandledKey = @"URLProtocolHandledKey";
         [self.client URLProtocolDidFinishLoading:self];
         return;
     } else {
+        mutableReqeust = [self redirectHostInRequset:mutableReqeust];
         //获取网络资源
         [[[NSURLSession sharedSession] dataTaskWithRequest:mutableReqeust completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
             [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
@@ -91,7 +87,7 @@ static NSString * const URLProtocolHandledKey = @"URLProtocolHandledKey";
 /**
  替换原来的域名
  */
-+(NSMutableURLRequest*)redirectHostInRequset:(NSMutableURLRequest*)request
+- (NSMutableURLRequest*)redirectHostInRequset:(NSMutableURLRequest*)request
 {
     if ([request.URL host].length == 0) {
         return request;
