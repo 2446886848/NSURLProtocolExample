@@ -8,6 +8,7 @@
 
 #import "CustomURLProtocol.h"
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 
 static NSString * const URLProtocolHandledKey = @"URLProtocolHandledKey";
 
@@ -17,30 +18,36 @@ static NSString * const URLProtocolHandledKey = @"URLProtocolHandledKey";
 
 @implementation CustomURLProtocol
 
-+ (BOOL)isImageUrl:(NSURLRequest *)request {
-    NSString *extension = request.URL.pathExtension.lowercaseString;
-    NSArray *pngTails = @[@"png", @"jpeg", @"gif", @"jpg"];
-    return [pngTails containsObject:extension];
++ (NSDictionary<NSString *,NSString *> *)replacedUrlMap {
+    return objc_getAssociatedObject(self, @selector(replacedUrlMap));
+}
+
++ (void)setReplacedUrlMap:(NSDictionary<NSString *,NSString *> *)replacedUrlMap {
+    objc_setAssociatedObject(self, @selector(replacedUrlMap), replacedUrlMap, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 + (BOOL)canInitWithRequest:(NSURLRequest *)request
 {
-    //只处理http和https请求
-    NSString *scheme = [[request URL] scheme];
+    BOOL ret = NO;
+    
+    //已经处理过的不再处理
     BOOL isDealed = [NSURLProtocol propertyForKey:URLProtocolHandledKey inRequest:request] != nil;
-    if ([self isImageUrl:request]) {
-        return !isDealed;
-    } else if ( ([scheme caseInsensitiveCompare:@"http"] == NSOrderedSame ||
-     [scheme caseInsensitiveCompare:@"https"] == NSOrderedSame))
-    {
-        //看看是否已经处理过了，防止无限循环
-        return !isDealed;
+    if (isDealed) {
+        return NO;
     }
-    return NO;
+    for (NSString *originUrl in self.replacedUrlMap.allKeys) {
+        if ([request.URL.absoluteString containsString:originUrl]) {
+            ret = YES;
+            break;
+        }
+    }
+    return ret;
 }
 
-+ (NSURLRequest *) canonicalRequestForRequest:(NSURLRequest *)request {
-    return request;
++ (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request {
+    NSMutableURLRequest *mutableReqeust = [request mutableCopy];
+    mutableReqeust = [self redirectHostInRequset:mutableReqeust];
+    return mutableReqeust;
 }
 
 + (BOOL)requestIsCacheEquivalent:(NSURLRequest *)a toRequest:(NSURLRequest *)b
@@ -55,27 +62,15 @@ static NSString * const URLProtocolHandledKey = @"URLProtocolHandledKey";
     //打标签，防止无限循环
     [NSURLProtocol setProperty:@YES forKey:URLProtocolHandledKey inRequest:mutableReqeust];
     
-    //读取本地图片
-    if ([self.class isImageUrl:mutableReqeust]) {
-        NSData *imageData = UIImagePNGRepresentation([UIImage imageNamed:@"image"]);
-        
-        NSURLResponse *response = [[NSURLResponse alloc] initWithURL:mutableReqeust.URL MIMEType:@"image/png" expectedContentLength:imageData.length textEncodingName:nil];
+    //获取网络资源
+    [[[NSURLSession sharedSession] dataTaskWithRequest:mutableReqeust completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
         [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
-        [self.client URLProtocol:self didLoadData:imageData];
+        [self.client URLProtocol:self didLoadData:data];
         [self.client URLProtocolDidFinishLoading:self];
-        return;
-    } else {
-        mutableReqeust = [self redirectHostInRequset:mutableReqeust];
-        //获取网络资源
-        [[[NSURLSession sharedSession] dataTaskWithRequest:mutableReqeust completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
-            [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
-            [self.client URLProtocol:self didLoadData:data];
-            [self.client URLProtocolDidFinishLoading:self];
-            if (error) {
-                [self.client URLProtocol:self didFailWithError:error];
-            }
-        }] resume];
-    }
+        if (error) {
+            [self.client URLProtocol:self didFailWithError:error];
+        }
+    }] resume];
 }
 
 - (void)stopLoading
@@ -87,24 +82,22 @@ static NSString * const URLProtocolHandledKey = @"URLProtocolHandledKey";
 /**
  替换原来的域名
  */
-- (NSMutableURLRequest*)redirectHostInRequset:(NSMutableURLRequest*)request
++(NSMutableURLRequest*)redirectHostInRequset:(NSMutableURLRequest*)request
 {
     if ([request.URL host].length == 0) {
         return request;
     }
     
     NSString *originUrlString = [request.URL absoluteString];
-    NSString *originHostString = [request.URL host];
-    NSRange hostRange = [originUrlString rangeOfString:originHostString];
-    if (hostRange.location == NSNotFound) {
-        return request;
-    }
     
-    //定向到bing搜索主页
-    NSString *urlString = @"http://cn.bing.com/";
-    NSURL *url = [NSURL URLWithString:urlString];
-    request.URL = url;
-
+    for (NSString *originUrl in self.replacedUrlMap.allKeys) {
+        if ([originUrlString containsString:originUrl]) {
+            NSString *replacedUrl = [originUrlString stringByReplacingOccurrencesOfString:originUrl withString:self.replacedUrlMap[originUrl]];
+            NSURL *url = [NSURL URLWithString:replacedUrl];
+            request.URL = url;
+            break;
+        }
+    }
     return request;
 }
 

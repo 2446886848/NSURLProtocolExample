@@ -10,6 +10,4 @@
 
 @interface CustomURLProtocol : NSURLProtocol
 
-@property (nonatomic, strong, class) NSDictionary<NSString *, NSString *> *replacedUrlMap;
-
 @end
